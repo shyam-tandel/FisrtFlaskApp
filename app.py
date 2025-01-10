@@ -40,6 +40,18 @@ class Employee(db.Model):
 #     categories = Category.query.all()
 #     return render_template('index.html', categories=categories)
 
+@app.route("/todo/<int:sno>",methods=["DELETE"])
+def delete_todo(sno):
+    todo = Todo.query.get(sno)
+    if todo is None:
+        return jsonify({"error : Todo not found"}),404
+
+    db.session.delete(todo)
+    db.session.commit()
+    
+    return jsonify({"message": f"Todo with sno {sno} has been deleted."}), 200
+    # return "success",200
+
 @app.route("/todo/<int:sno>", methods=["PUT"])
 def update_todo_put(sno):
 
