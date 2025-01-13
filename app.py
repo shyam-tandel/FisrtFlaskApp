@@ -3,12 +3,14 @@ from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from werkzeug.utils import secure_filename
+from flask_restful import Api, Resource
 
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = "mysql://shyam:shyam123@localhost:3306/todo"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+api = Api(app)
 migrate = Migrate(app, db)
 
 class Todo(db.Model):
@@ -34,11 +36,118 @@ class Employee(db.Model):
     salary = db.Column(db.Float)
 
 
-#for desplay category in dropdown menu
-# @app.route('/')
-# def show_category():
-#     categories = Category.query.all()
-#     return render_template('index.html', categories=categories)
+#REST API method for todo table
+
+class TodoList(Resource):
+    def get(self):
+        todos = Todo.query.all()
+        todos_list = [{"sno": todo.sno, "title": todo.title, "desc": todo.desc, "date_created": todo.date_created, "category_id": todo.category_id} for todo in todos]
+
+        return jsonify(todos_list)
+
+    def post(self):
+        data = request.get_json()
+        title = data.get("title")
+        desc= data.get("desc")
+        category_id = data.get("category_id")
+
+        new_todo = Todo(
+            title=title,
+            desc=desc,
+            category_id=category_id
+        )   
+        db.session.add(new_todo)
+        db.session.commit()
+      
+        return jsonify({"message": "Todo created successfully!"})
+
+class TodoItem(Resource):
+    def get(self, sno):
+        todo = Todo.query.get(sno)
+        if todo:
+            return jsonify({"sno":todo.sno, "title":todo.title, "desc":todo.desc,"category_id": todo.category_id})
+        return jsonify({"massage":"Todo not found"})
+    
+    def put(self, sno):
+        todo = Todo.query.get(sno)
+        data = request.get_json()
+
+        if todo:
+            todo.title = data.get("title",todo.title)
+            todo.desc = data.get("desc",todo.desc)
+            todo.category_id = data.get("category_id",todo.category_id)
+            db.session.commit()
+            return jsonify({"massage":"Todo updated successfully"})
+        return jsonify({"massage":"todo not found"})
+        
+    def delete(self,sno):
+        todo = Todo.query.get(sno)
+        
+        if todo:
+            db.session.delete(todo)
+            db.session.commit()
+            return jsonify({"massage":"todo deleted successfully."})
+        return jsonify({"massage":"todo not found"})
+        
+#REST API method for category table
+class CategoryList(Resource):
+    def get(self):
+        categories = Category.query.all()
+        if categories:
+            # Serialize the list of Category objects
+            category_list = []
+            for category in categories:
+                category_list.append({
+                    "category_id": category.id,
+                    "category_name": category.name,
+                    "todos": [todo.category_id for todo in category.todos]  # Assuming 'todos' is a relationship with Todo objects
+                })
+            return jsonify(category_list)  # Return the list of serialized categories
+        return jsonify({"message": "No categories found"}), 404
+
+    def post(self):
+        data = request.get_json()
+        id = data.get("id")
+        name = data.get("name")
+
+        new_category = Category(
+            id=id,
+            name=name
+        )
+        db.session.add(new_category)
+        db.session.commit()
+
+        return "category add successfully"
+class CategoryItem(Resource):
+    def get(self,id):
+        category = Category.query.get(id)
+        if category:
+            return jsonify({"category_id":category.id,"category_name": category.name})
+        return jsonify({"massage":"Category not found"})
+
+    def put(self,id):
+        category = Category.query.get(id)
+        data = request.get_json()
+        if category:
+            # category.id = data.get("id",category.id)
+            category.name = data.get("name",category.name)
+            db.session.commit()
+            return "category updated successfully."
+        return "category does not exists."
+    def delete(self,id):
+        category = Category.query.get(id)
+        if category:
+            db.session.delete(category)
+            db.session.commit()
+            return "Category deleted successfully"
+        return "Category not found"
+
+api.add_resource(TodoList,'/todos')
+api.add_resource(TodoItem,'/todos/<int:sno>')
+api.add_resource(CategoryList,'/category')
+api.add_resource(CategoryItem,'/category/<int:id>')
+
+
 
 @app.route("/todo/<int:sno>",methods=["DELETE"])
 def delete_todo(sno):
@@ -55,12 +164,12 @@ def delete_todo(sno):
 @app.route("/todo/<int:sno>", methods=["PUT"])
 def update_todo_put(sno):
 
-    print(f"Updating Todo with sno: {sno}")  # Debugging log
+    # print(f"Updating Todo with sno: {sno}")  # Debugging log
 
     todo = Todo.query.get_or_404(sno)   
     if todo is None:
         return jsonify({"error": "Todo not found"}), 404
-    print(f"Found Todo: {todo.title}")  # Log the found todo
+    # print(f"Found Todo: {todo.title}")  # Log the found todo
 
     data = request.get_json()
     todo.title = data.get("title", todo.title)  
