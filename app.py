@@ -4,7 +4,13 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from werkzeug.utils import secure_filename
 from flask_restful import Api, Resource
+import boto3
+import json
+import base64
+import re
+import mimetypes
 
+from promts import RESUME_PROMPT
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = "mysql://shyam:shyam123@localhost:3306/todo"
@@ -35,6 +41,23 @@ class Employee(db.Model):
     job_role = db.Column(db.String(200), nullable=False)
     salary = db.Column(db.Float)
 
+
+class TaxDeclarationCategory(db.Model):
+    """Use this model for store tax declaration category."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=db.func.current_timestamp()
+    )
+    created_by = db.Column(db.Integer, nullable=True)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=db.func.current_timestamp(),
+        onupdate=db.func.current_timestamp(),
+    )
+    updated_by = db.Column(db.Integer, nullable=True)
 
 #REST API method for todo table
 
@@ -149,17 +172,18 @@ api.add_resource(CategoryItem,'/category/<int:id>')
 
 
 
-@app.route("/todo/<int:sno>",methods=["DELETE"])
+@app.route("/delete_todo/<int:sno>",methods=["DELETE"])
 def delete_todo(sno):
-    todo = Todo.query.get(sno)
-    if todo is None:
-        return jsonify({"error : Todo not found"}),404
+    if request.method == "DELETE":
+        todo = Todo.query.get(sno)
+        if todo is None:
+            return jsonify({"error : Todo not found"}),404
 
-    db.session.delete(todo)
-    db.session.commit()
-    
-    return jsonify({"message": f"Todo with sno {sno} has been deleted."}), 200
-    # return "success",200
+        db.session.delete(todo)
+        db.session.commit()
+        
+        return jsonify({"message": f"Todo with sno {sno} has been deleted."}), 200
+        # return "success",200
 
 @app.route("/todo/<int:sno>", methods=["PUT"])
 def update_todo_put(sno):
@@ -251,6 +275,82 @@ def upload():
         file.save(f'uploads/{secure_filename(file.filename)}')
     return redirect('/')
 
+
+def sanitize_filename(filename):
+    # Remove invalid characters and replace multiple spaces with a single space
+    sanitized_name = re.sub(r"[^a-zA-Z0-9\s\-\(\)\[\]]", "", filename)  # Keep only allowed characters
+    sanitized_name = re.sub(r"\s+", "_", sanitized_name)  # Replace multiple spaces with one space
+    return sanitized_name.strip()
+import os
+
+def get_file_format(filename):
+    _, ext = os.path.splitext(filename)
+    return ext.lower().lstrip('.') 
+
+def get_file_name(filename):
+    name, _ = os.path.splitext(filename)  # Split filename and extension
+    return name
+
+@app.route("/text-generation", methods = ['POST'])
+def text_generation():
+   
+    file = request.files.get("file")
+    client = boto3.client(service_name= "bedrock-runtime", region_name="eu-central-1") 
+
+    model_id = "anthropic.claude-3-sonnet-20240229-v1:0"
+
+    ALLOWED_FILE_FORMAT = {'pdf', 'csv', 'doc', 'docx', 'xls', 'xlsx', 'html', 'txt', 'md'}
+
+    file_name = file.filename
+  
+    file_name_without_extention = get_file_name(file_name)
+    print(file_name_without_extention)
+    file_type = get_file_format(file_name)
+    if file_type not in ALLOWED_FILE_FORMAT:
+        return f"select a file which have this format {ALLOWED_FILE_FORMAT}"
+    print(file_type)
+   
+    encoded_string = file.read()
+
+    messages = [
+        {
+            "role": "user",
+            "content": [{
+                "document":{
+                    "format": file_type,  # Example: 'pdf', 'docx', 'txt', etc.
+                    "name": str(file_name_without_extention),
+                    "source": {
+                            "bytes": encoded_string
+                    }
+                },
+                
+            },
+            {
+                # "type": 'text',
+                "text": str(RESUME_PROMPT) 
+            }
+            ]
+        },
+    ]
+  
+    # Generate text
+    response = client.converse(
+        modelId=model_id,
+        messages=messages,
+
+    )
+
+    print("response:::::::",response)
+    response_body = response["output"]["message"]["content"][0]["text"]
+    print("response_body:::::",response_body)
+    json_data = json.loads(response_body)  
+    # json_data = json.load(response_body)
+    print("json data:::::",json_data)
+  
+    print("response Text::::::::;:::\n",type(json_data))
+
+    return json_data
+
 @app.route("/submit",methods = ['POST','GET'])
 def submit():
     if request.method == 'POST':
@@ -331,4 +431,4 @@ def user(username):
 if __name__ == "__main__":
     with app.app_context(): 
         db.create_all()
-    app.run(debug=True)
+    app.run(debug=True,host="0.0.0.0",)
